@@ -1,0 +1,1321 @@
+"use client";
+import { useState, useRef } from "react";
+import {
+  Upload,
+  Download,
+  Check,
+  RotateCcw,
+  Info,
+  ShoppingBag,
+  Sparkles,
+  Star,
+  Sofa,
+  BedDouble,
+  UtensilsCrossed,
+  Briefcase,
+  Bath,
+} from "lucide-react";
+
+/* ============================================================
+   DESIGN TOKENS
+   ============================================================ */
+const TOKENS = {
+  paper: "#EFEAE0",
+  paperDeep: "#E2DBCB",
+  ink: "#211E1A",
+  inkSoft: "#5C574C",
+  sage: "#6E7B5C",
+  sageDeep: "#57634A",
+  clay: "#B8654F",
+  line: "#D9D2C4",
+  cream: "#F7F4EC",
+  amber: "#B98A3E",
+  redMuted: "#A24E42",
+};
+
+// Replace with your own Amazon Associates tracking ID before going live.
+// In a real Next.js deployment this becomes: process.env.NEXT_PUBLIC_AMAZON_TAG
+const AMAZON_TAG = "yourtag-20";
+
+const ROOM_TYPES = [
+  { id: "living", label: "Living Room", Icon: Sofa },
+  { id: "bedroom", label: "Bedroom", Icon: BedDouble },
+  { id: "kitchen", label: "Kitchen", Icon: UtensilsCrossed },
+  { id: "office", label: "Office", Icon: Briefcase },
+  { id: "bath", label: "Bathroom", Icon: Bath },
+];
+
+/* ============================================================
+   VAULT PERSISTENCE
+   Claude Artifacts cannot use localStorage / sessionStorage —
+   those calls fail silently in this environment. This in-memory
+   store keeps the exact same get/set shape so that on your own
+   deployed domain you can swap the two function bodies for:
+     localStorage.getItem('stylevault_vault')
+     localStorage.setItem('stylevault_vault', JSON.stringify(value))
+   and nothing else in the component needs to change.
+   ============================================================ */
+let memoryVault = [];
+function vaultGet() {
+  return memoryVault;
+}
+function vaultSet(entries) {
+  memoryVault = entries;
+}
+
+/* ============================================================
+   STYLE RULE ENGINE
+   Seven aesthetic buckets, scored via multi-swatch weighted
+   color match + grid-based luminance variance, so two rooms
+   sharing a palette but differing in contrast (dim/moody vs.
+   bright/airy) can land in different buckets.
+   ============================================================ */
+const STYLE_BUCKETS = [
+  {
+    id: "japandi",
+    name: "Japandi",
+    blurb: "Warm wood, soft neutrals, and uncluttered lines. Reads calm without feeling bare.",
+    quote: "Calm, considered, and quietly confident.",
+    traits: ["Warm", "Quiet", "Natural", "Uncluttered", "Grounded"],
+    idealHue: 35, idealSat: 0.18, idealLight: 0.62,
+    varCenter: 0.28, varSpread: 0.18,
+    hueWeight: 1, satWeight: 1, lightWeight: 0.6,
+    modifiers: ["Warm Organic", "Quiet", "Sunlit"],
+    avoid: ["High-gloss chrome or steel finishes", "Cool blue-white LED lighting", "Glossy black lacquer furniture"],
+    gapPool: [
+      { t: "Natural linen curtains", i: 3 },
+      { t: "Low oak side table", i: 3 },
+      { t: "Handwoven jute rug", i: 2 },
+      { t: "Paper lantern floor lamp", i: 2 },
+      { t: "Unglazed stoneware vase", i: 2 },
+      { t: "Woven seagrass storage basket", i: 1 },
+      { t: "Low platform bed frame", i: 1 },
+      { t: "Matte ceramic table lamp", i: 1 },
+    ],
+  },
+  {
+    id: "scandinavian",
+    name: "Scandinavian",
+    blurb: "Light woods, soft whites, and function-first pieces built for long grey winters.",
+    quote: "Bright, uncluttered, and built to feel like a deep breath.",
+    traits: ["Bright", "Airy", "Functional", "Soft", "Simple"],
+    idealHue: 42, idealSat: 0.08, idealLight: 0.82,
+    varCenter: 0.2, varSpread: 0.15,
+    hueWeight: 0.7, satWeight: 1.2, lightWeight: 1,
+    modifiers: ["Soft Minimalist", "Bright", "Hygge"],
+    avoid: ["Heavy dark drapery", "Ornate gilt picture frames", "Deep jewel-toned upholstery"],
+    gapPool: [
+      { t: "Sheepskin throw", i: 3 },
+      { t: "White oak open shelving", i: 3 },
+      { t: "Matte black wall sconce", i: 2 },
+      { t: "Chunky wool cushions", i: 2 },
+      { t: "Potted olive tree", i: 2 },
+      { t: "Simple linen bedding set", i: 1 },
+      { t: "Pale birch stool", i: 1 },
+      { t: "Woven wall hanging", i: 1 },
+    ],
+  },
+  {
+    id: "organic-modern",
+    name: "Organic Modern",
+    blurb: "Earthy neutrals and curved, natural forms. Modern with a handmade softness.",
+    quote: "Soft edges, warm materials, effortlessly grounded.",
+    traits: ["Earthy", "Curved", "Textural", "Relaxed", "Warm"],
+    idealHue: 24, idealSat: 0.28, idealLight: 0.55,
+    varCenter: 0.36, varSpread: 0.18,
+    hueWeight: 1, satWeight: 1, lightWeight: 0.7,
+    modifiers: ["Warm", "Earthy", "Sculpted"],
+    avoid: ["Sharp chrome edges", "Glossy plastic laminate", "Stark cool-white lighting"],
+    gapPool: [
+      { t: "Bouclé accent chair", i: 3 },
+      { t: "Rattan pendant light", i: 3 },
+      { t: "Travertine side table", i: 2 },
+      { t: "Dried pampas grass stems", i: 2 },
+      { t: "Curved floor mirror", i: 2 },
+      { t: "Terracotta planter set", i: 1 },
+      { t: "Fluted glass vase", i: 1 },
+      { t: "Nubby wool throw", i: 1 },
+    ],
+  },
+  {
+    id: "coastal-grandma",
+    name: "Coastal Grandma",
+    blurb: "Soft blues, sandy neutrals, and slipcovered linen. Breezy and lived-in.",
+    quote: "Sun-faded and easy, like a house that's always had guests over.",
+    traits: ["Breezy", "Faded", "Layered", "Easy", "Nostalgic"],
+    idealHue: 205, idealSat: 0.22, idealLight: 0.72,
+    varCenter: 0.24, varSpread: 0.18,
+    hueWeight: 1.1, satWeight: 1, lightWeight: 0.8,
+    modifiers: ["Chic", "Breezy", "Sun-Faded"],
+    avoid: ["Neon or highlighter brights", "Glossy black finishes", "Heavy formal velvet"],
+    gapPool: [
+      { t: "Rattan armchair", i: 3 },
+      { t: "Linen slipcover throw", i: 3 },
+      { t: "Woven seagrass basket", i: 2 },
+      { t: "Blue and white ceramic lamp", i: 2 },
+      { t: "Driftwood mirror frame", i: 2 },
+      { t: "Striped cotton cushions", i: 1 },
+      { t: "Rope-wrapped side table", i: 1 },
+      { t: "Sea glass candle holders", i: 1 },
+    ],
+  },
+  {
+    id: "dark-academia",
+    name: "Dark Academia Sanctuary",
+    blurb: "Deep greens and worn leather, lit low. A room that rewards slowing down.",
+    quote: "Low light, deep color, a room that rewards slowing down.",
+    traits: ["Moody", "Rich", "Intimate", "Storied", "Warm"],
+    idealHue: 140, idealSat: 0.35, idealLight: 0.28,
+    varCenter: 0.56, varSpread: 0.2,
+    hueWeight: 1, satWeight: 1, lightWeight: 1,
+    modifiers: ["Sanctuary", "Moody", "Candlelit"],
+    avoid: ["Pastel plastics", "Bright white gloss surfaces", "Sleek brushed-steel accents"],
+    gapPool: [
+      { t: "Brass reading lamp", i: 3 },
+      { t: "Leather wingback chair", i: 3 },
+      { t: "Velvet throw pillow", i: 2 },
+      { t: "Stacked vintage books", i: 2 },
+      { t: "Oil-toned framed art", i: 2 },
+      { t: "Heavy wood bookshelf", i: 1 },
+      { t: "Wool tartan blanket", i: 1 },
+      { t: "Brass candle sconces", i: 1 },
+    ],
+  },
+  {
+    id: "boho-eclectic",
+    name: "Boho Eclectic",
+    blurb: "Layered pattern, mixed eras, and color that refuses to sit still.",
+    quote: "Layered, collected, unmistakably yours.",
+    traits: ["Layered", "Collected", "Playful", "Textural", "Bold"],
+    idealHue: 28, idealSat: 0.45, idealLight: 0.5,
+    varCenter: 0.66, varSpread: 0.22,
+    hueWeight: 0.4, satWeight: 1.3, lightWeight: 0.5,
+    modifiers: ["Layered", "Sun-Soaked", "Collected"],
+    avoid: ["Strict monochrome palettes", "Single-tone minimalism", "Cold brushed-steel finishes"],
+    gapPool: [
+      { t: "Macrame wall hanging", i: 3 },
+      { t: "Layered vintage rugs", i: 3 },
+      { t: "Rattan pendant shade", i: 2 },
+      { t: "Patterned throw pillow set", i: 2 },
+      { t: "Hanging plant trio", i: 2 },
+      { t: "Mixed metal candle holders", i: 1 },
+      { t: "Kantha throw blanket", i: 1 },
+      { t: "Woven pouf ottoman", i: 1 },
+    ],
+  },
+  {
+    id: "mid-century",
+    name: "Mid-Century Warmth",
+    blurb: "Walnut tones, tapered legs, and mustard-and-olive accents from an era that keeps returning.",
+    quote: "Warm wood and confident color from an era that never really left.",
+    traits: ["Warm", "Retro", "Confident", "Geometric", "Timeless"],
+    idealHue: 44, idealSat: 0.4, idealLight: 0.45,
+    varCenter: 0.42, varSpread: 0.18,
+    hueWeight: 1, satWeight: 1, lightWeight: 0.7,
+    modifiers: ["Warmth", "Retro", "Sunset"],
+    avoid: ["Farmhouse shiplap paneling", "Glossy white cabinetry", "Ornate baroque detailing"],
+    gapPool: [
+      { t: "Walnut credenza", i: 3 },
+      { t: "Mustard bouclé accent chair", i: 3 },
+      { t: "Starburst wall mirror", i: 2 },
+      { t: "Tapered-leg side table", i: 2 },
+      { t: "Geometric wool rug", i: 2 },
+      { t: "Brass arc floor lamp", i: 1 },
+      { t: "Teak bowl set", i: 1 },
+      { t: "Amber glass pendant", i: 1 },
+    ],
+  },
+];
+
+/* ============================================================
+   DEMO PRESETS — instant, zero-upload. Illustrated procedurally
+   rather than photographed (no legitimate way to host real room
+   photography inside a client-side artifact).
+   ============================================================ */
+const DEMO_PRESETS = [
+  {
+    id: "sunlit", name: "Sunlit Studio", variant: 0, variance: 0.22,
+    palette: [
+      { r: 238, g: 231, b: 219, weight: 0.32, hex: "#EEE7DB" },
+      { r: 214, g: 184, b: 151, weight: 0.24, hex: "#D6B897" },
+      { r: 225, g: 214, b: 196, weight: 0.2, hex: "#E1D6C4" },
+      { r: 122, g: 140, b: 108, weight: 0.14, hex: "#7A8C6C" },
+      { r: 40, g: 36, b: 32, weight: 0.1, hex: "#282420" },
+    ],
+  },
+  {
+    id: "nook", name: "Reading Nook", variant: 1, variance: 0.58,
+    palette: [
+      { r: 47, g: 66, b: 52, weight: 0.3, hex: "#2F4234" },
+      { r: 74, g: 42, b: 36, weight: 0.22, hex: "#4A2A24" },
+      { r: 150, g: 112, b: 58, weight: 0.16, hex: "#96703A" },
+      { r: 58, g: 40, b: 28, weight: 0.2, hex: "#3A281C" },
+      { r: 210, g: 196, b: 170, weight: 0.12, hex: "#D2C4AA" },
+    ],
+  },
+  {
+    id: "loft", name: "Eclectic Loft", variant: 2, variance: 0.68,
+    palette: [
+      { r: 196, g: 106, b: 74, weight: 0.24, hex: "#C46A4A" },
+      { r: 206, g: 158, b: 58, weight: 0.2, hex: "#CE9E3A" },
+      { r: 58, g: 120, b: 118, weight: 0.18, hex: "#3A7876" },
+      { r: 168, g: 70, b: 96, weight: 0.16, hex: "#A84660" },
+      { r: 196, g: 168, b: 120, weight: 0.22, hex: "#C4A878" },
+    ],
+  },
+];
+
+/* ============================================================
+   NAMED COLOR LOOKUP (nearest-match, for palette swatch labels)
+   ============================================================ */
+const NAMED_COLORS = [
+  ["Walnut", 92, 68, 51], ["Charcoal", 43, 41, 38], ["Stone", 167, 156, 140],
+  ["Sage", 138, 154, 123], ["Ivory", 241, 234, 217], ["Oat", 217, 201, 168],
+  ["Terracotta", 193, 99, 63], ["Olive", 107, 107, 58], ["Rust", 168, 80, 45],
+  ["Navy", 38, 52, 74], ["Brass", 176, 141, 69], ["Cream", 239, 230, 210],
+  ["Taupe", 140, 123, 107], ["Plum", 91, 58, 78], ["Mustard", 201, 154, 52],
+  ["Forest", 51, 71, 47], ["Blush", 227, 183, 174], ["Slate", 92, 101, 112],
+  ["Sand", 216, 198, 165], ["Espresso", 59, 42, 32], ["Birch", 228, 217, 196],
+  ["Clay", 182, 101, 79], ["Moss", 92, 107, 69], ["Ink", 33, 30, 26],
+  ["Linen", 237, 230, 214], ["Camel", 191, 148, 98], ["Teal", 58, 120, 118],
+  ["Burgundy", 90, 32, 38], ["Ash", 176, 172, 163], ["Honey", 197, 148, 74],
+  ["Driftwood", 176, 163, 140], ["Graphite", 60, 60, 60], ["Peach", 232, 178, 146],
+  ["Denim", 66, 90, 120],
+];
+function nearestColorName(r, g, b) {
+  let best = "Neutral", bestDist = Infinity;
+  NAMED_COLORS.forEach(([name, nr, ng, nb]) => {
+    const d = (r - nr) ** 2 + (g - ng) ** 2 + (b - nb) ** 2;
+    if (d < bestDist) { bestDist = d; best = name; }
+  });
+  return best;
+}
+
+/* ============================================================
+   COLOR + STATS HELPERS
+   ============================================================ */
+function rgbToHex(r, g, b) {
+  return "#" + [r, g, b].map((v) =>
+    Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")
+  ).join("");
+}
+
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4;
+    }
+    h *= 60;
+  }
+  return { h, s, l };
+}
+
+function hueDistance(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function hueFamilyName(h) {
+  if (h < 15 || h >= 345) return "red";
+  if (h < 45) return "warm orange";
+  if (h < 70) return "golden yellow";
+  if (h < 160) return "green";
+  if (h < 200) return "teal";
+  if (h < 250) return "blue";
+  if (h < 290) return "violet";
+  return "rose";
+}
+function levelWord(v, lowT, highT, labels) {
+  if (v < lowT) return labels[0];
+  if (v > highT) return labels[2];
+  return labels[1];
+}
+
+/* Median-cut color quantization — no external library available
+   in this environment, so this is a hand-rolled real implementation
+   rather than a stand-in. */
+function medianCutQuantize(pixels, targetCount) {
+  let buckets = [pixels];
+  let guard = 0;
+  while (buckets.length < targetCount && guard < targetCount * 4) {
+    guard++;
+    let splitIdx = -1, maxRange = -1, splitChannel = 0;
+    buckets.forEach((bucket, idx) => {
+      if (bucket.length <= 1) return;
+      for (let ch = 0; ch < 3; ch++) {
+        let min = Infinity, max = -Infinity;
+        for (let p = 0; p < bucket.length; p++) {
+          const v = bucket[p][ch];
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+        const range = max - min;
+        if (range > maxRange) {
+          maxRange = range; splitIdx = idx; splitChannel = ch;
+        }
+      }
+    });
+    if (splitIdx === -1 || maxRange <= 0) break;
+    const bucket = buckets[splitIdx];
+    bucket.sort((a, b) => a[splitChannel] - b[splitChannel]);
+    const mid = Math.floor(bucket.length / 2);
+    buckets.splice(splitIdx, 1, bucket.slice(0, mid), bucket.slice(mid));
+  }
+  const total = pixels.length || 1;
+  return buckets
+    .filter((b) => b.length > 0)
+    .map((bucket) => {
+      let r = 0, g = 0, b2 = 0;
+      bucket.forEach((p) => { r += p[0]; g += p[1]; b2 += p[2]; });
+      const n = bucket.length;
+      const rr = r / n, gg = g / n, bb = b2 / n;
+      return { r: rr, g: gg, b: bb, weight: n / total, hex: rgbToHex(rr, gg, bb) };
+    })
+    .sort((a, b) => b.weight - a.weight);
+}
+
+function computeGridVariance(imageData, gridSize = 6) {
+  const { width, height, data } = imageData;
+  const cellW = width / gridSize, cellH = height / gridSize;
+  const cellMeans = [];
+  for (let gy = 0; gy < gridSize; gy++) {
+    for (let gx = 0; gx < gridSize; gx++) {
+      let sum = 0, count = 0;
+      const xStart = Math.floor(gx * cellW), xEnd = Math.floor((gx + 1) * cellW);
+      const yStart = Math.floor(gy * cellH), yEnd = Math.floor((gy + 1) * cellH);
+      for (let y = yStart; y < yEnd; y++) {
+        for (let x = xStart; x < xEnd; x++) {
+          const idx = (y * width + x) * 4;
+          if (data[idx + 3] < 120) continue;
+          sum += 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+          count++;
+        }
+      }
+      if (count > 0) cellMeans.push(sum / count);
+    }
+  }
+  if (cellMeans.length === 0) return 0.3;
+  const mean = cellMeans.reduce((s, v) => s + v, 0) / cellMeans.length;
+  const variance = cellMeans.reduce((s, v) => s + (v - mean) ** 2, 0) / cellMeans.length;
+  return Math.sqrt(variance) / 90;
+}
+
+function weightedProfile(swatches) {
+  let sinSum = 0, cosSum = 0, satSum = 0, lightSum = 0, wSum = 0;
+  swatches.forEach((c) => {
+    const { h, s, l } = rgbToHsl(c.r, c.g, c.b);
+    const rad = (h * Math.PI) / 180;
+    sinSum += Math.sin(rad) * c.weight;
+    cosSum += Math.cos(rad) * c.weight;
+    satSum += s * c.weight;
+    lightSum += l * c.weight;
+    wSum += c.weight;
+  });
+  let hue = (Math.atan2(sinSum, cosSum) * 180) / Math.PI;
+  if (hue < 0) hue += 360;
+  return { hue, sat: wSum ? satSum / wSum : 0.2, light: wSum ? lightSum / wSum : 0.5 };
+}
+
+function scoreStyles(swatches, variance, boosts = {}) {
+  const raw = STYLE_BUCKETS.map((bucket) => {
+    let colorMatchSum = 0;
+    swatches.forEach((sw) => {
+      const { h, s, l } = rgbToHsl(sw.r, sw.g, sw.b);
+      const hueDist = hueDistance(h, bucket.idealHue) / 180;
+      const satDist = Math.abs(s - bucket.idealSat);
+      const lightDist = Math.abs(l - bucket.idealLight);
+      const wSum = bucket.hueWeight + bucket.satWeight + bucket.lightWeight;
+      const match = 1 - Math.min(1,
+        (hueDist * bucket.hueWeight + satDist * bucket.satWeight + lightDist * bucket.lightWeight) / wSum
+      );
+      colorMatchSum += match * sw.weight;
+    });
+    const varMatch = Math.max(0, 1 - Math.abs(variance - bucket.varCenter) / bucket.varSpread);
+    let combined = colorMatchSum * 0.6 + varMatch * 0.4;
+    combined = Math.max(0.02, combined);
+    let adjusted = Math.pow(combined, 3);
+    const boost = boosts[bucket.id] || 0;
+    adjusted = adjusted * (1 + boost * 0.08);
+    return { ...bucket, rawScore: adjusted };
+  });
+  const total = raw.reduce((s, b) => s + b.rawScore, 0) || 1;
+  return raw.map((b) => ({ ...b, pct: (b.rawScore / total) * 100 })).sort((a, b) => b.pct - a.pct);
+}
+
+function computeCohesion(scored) {
+  const top1 = scored[0].pct;
+  const top2 = scored[1] ? scored[1].pct : 0;
+  return Math.round(Math.max(35, Math.min(98, 42 + (top1 - top2) * 0.95)));
+}
+
+function cohesionColor(c) {
+  if (c >= 75) return TOKENS.sageDeep;
+  if (c >= 50) return TOKENS.amber;
+  return TOKENS.redMuted;
+}
+
+function roomStatusLabel(c) {
+  if (c >= 75) return "Designer Ready";
+  if (c >= 50) return "Promising Foundation";
+  return "Needs Warmth";
+}
+
+// Both previews below reuse the real scoring function with a hypothetical
+// boost applied — they're genuine projections from the same math the live
+// Score Booster uses, not invented numbers.
+function projectCohesion(source, winnerId, boostAmount) {
+  const projected = scoreStyles(source.swatches, source.variance, { [winnerId]: boostAmount });
+  return computeCohesion(projected);
+}
+
+function bucketSwatch(bucket) {
+  const s = Math.min(70, Math.round(bucket.idealSat * 140));
+  const l = Math.round(38 + bucket.idealLight * 38);
+  return `hsl(${Math.round(bucket.idealHue)}, ${s}%, ${l}%)`;
+}
+
+function pickGapItems(bucket) {
+  return shuffle(bucket.gapPool).slice(0, 5).sort((a, b) => b.i - a.i);
+}
+
+function amazonUrl(query) {
+  return `https://www.amazon.com/s?k=${encodeURIComponent(query)}&tag=${AMAZON_TAG}`;
+}
+function etsyUrl(query) {
+  return `https://www.etsy.com/search?q=${encodeURIComponent(query)}`;
+}
+
+function tierClause(cohesion) {
+  if (cohesion >= 80) return "a few finishing touches would make it feel fully designed.";
+  if (cohesion >= 60) return "a handful of key pieces would pull it all together.";
+  return "leaning further into this palette would help it feel more intentional.";
+}
+
+function releaseCanvas(c) {
+  c.width = 0;
+  c.height = 0;
+}
+
+/* ============================================================
+   CANVAS EXPORT
+   ============================================================ */
+function truncateToWidth(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const candidate = text.slice(0, mid) + "…";
+    if (ctx.measureText(candidate).width <= maxWidth) lo = mid; else hi = mid - 1;
+  }
+  return text.slice(0, lo) + "…";
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
+  // Returns the y-coordinate of the last line actually drawn, so callers
+  // can advance the cursor by the real rendered height instead of a fixed
+  // guess. A 1-line result and a 2-line result must not consume the same
+  // vertical space on the poster.
+  const words = text.split(" ");
+  let line = "";
+  let cy = y;
+  let lineCount = 0;
+  for (let i = 0; i < words.length; i++) {
+    const test = line + words[i] + " ";
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lineCount++;
+      if (lineCount >= maxLines) {
+        ctx.fillText(truncateToWidth(ctx, line.trim(), maxWidth), x, cy);
+        return cy;
+      }
+      ctx.fillText(line.trim(), x, cy);
+      line = words[i] + " ";
+      cy += lineHeight;
+    } else {
+      line = test;
+    }
+  }
+  ctx.fillText(truncateToWidth(ctx, line.trim(), maxWidth), x, cy);
+  return cy;
+}
+
+function drawPoster(ctx, w, h, source, scored, cohesion, baseCohesion, gapItems) {
+  ctx.fillStyle = TOKENS.paper;
+  ctx.fillRect(0, 0, w, h);
+  const pad = w * 0.08;
+
+  ctx.strokeStyle = TOKENS.line;
+  ctx.lineWidth = Math.max(1, w * 0.0016);
+  ctx.strokeRect(pad * 0.4, pad * 0.4, w - pad * 0.8, h - pad * 0.8);
+
+  const winner = scored[0];
+  let cy = pad;
+
+  ctx.fillStyle = TOKENS.sageDeep;
+  ctx.font = `700 ${w * 0.024}px Inter, sans-serif`;
+  ctx.fillText("STYLEVAULT · ROOMSTYLE REPORT", pad, cy);
+  cy += w * 0.05;
+
+  ctx.fillStyle = cohesionColor(cohesion);
+  ctx.font = `700 ${w * 0.022}px Inter, sans-serif`;
+  ctx.fillText(`✦ STYLE CERTIFIED ${cohesion}%`, pad, cy);
+  cy += w * 0.06;
+
+  ctx.fillStyle = TOKENS.ink;
+  ctx.font = `600 ${w * 0.07}px Fraunces, serif`;
+  cy = wrapText(ctx, winner.name, pad, cy, w - pad * 2, w * 0.076, 2) + w * 0.05;
+
+  ctx.fillStyle = TOKENS.inkSoft;
+  ctx.font = `500 ${w * 0.022}px Inter, sans-serif`;
+  ctx.fillText(truncateToWidth(ctx, winner.modifiers.join("   ·   "), w - pad * 2), pad, cy);
+  cy += w * 0.05;
+
+  ctx.fillStyle = TOKENS.ink;
+  ctx.font = `italic 500 ${w * 0.026}px Fraunces, serif`;
+  cy = wrapText(ctx, `"${winner.quote}"`, pad, cy, w - pad * 2, w * 0.034, 2) + w * 0.05;
+
+  ctx.fillStyle = cohesionColor(cohesion);
+  ctx.font = `700 ${w * 0.1}px Fraunces, serif`;
+  ctx.fillText(`${cohesion}%`, pad, cy + w * 0.08);
+  ctx.fillStyle = TOKENS.inkSoft;
+  ctx.font = `600 ${w * 0.02}px Inter, sans-serif`;
+  ctx.fillText("COHESION SCORE", pad, cy + w * 0.11);
+  if (cohesion > baseCohesion) {
+    ctx.fillStyle = TOKENS.sageDeep;
+    ctx.font = `700 ${w * 0.02}px Inter, sans-serif`;
+    ctx.fillText(`+${cohesion - baseCohesion}% boosted`, pad + w * 0.28, cy + w * 0.08);
+  }
+  cy += w * 0.16;
+
+  const gap = w * 0.03;
+  const chipW = (w - pad * 2 - gap * 2) / 3;
+  const chipH = h * 0.16;
+  scored.slice(0, 3).forEach((b, i) => {
+    const x = pad + i * (chipW + gap);
+    const thisH = i === 0 ? chipH * 1.12 : i === 2 ? chipH * 0.88 : chipH;
+    const yOff = chipH - thisH;
+    ctx.fillStyle = bucketSwatch(b);
+    ctx.fillRect(x, cy + yOff, chipW, thisH * 0.58);
+    ctx.fillStyle = TOKENS.cream;
+    ctx.fillRect(x, cy + yOff + thisH * 0.58, chipW, thisH * 0.42);
+    ctx.fillStyle = TOKENS.ink;
+    ctx.font = `600 ${w * 0.018}px Inter, sans-serif`;
+    ctx.fillText(truncateToWidth(ctx, b.name, chipW - w * 0.02), x + w * 0.012, cy + yOff + thisH * 0.58 + w * 0.026);
+    ctx.fillStyle = TOKENS.clay;
+    ctx.font = `700 ${w * 0.028}px Fraunces, serif`;
+    ctx.fillText(`${Math.round(b.pct)}%`, x + w * 0.012, cy + yOff + thisH * 0.58 + w * 0.058);
+    if (i === 0) {
+      ctx.fillStyle = TOKENS.ink;
+      ctx.font = `700 ${w * 0.014}px Inter, sans-serif`;
+      ctx.fillText("BEST MATCH", x + w * 0.012, cy + yOff + w * 0.02);
+    }
+  });
+  cy += chipH * 1.12 + w * 0.05;
+
+  ctx.fillStyle = TOKENS.inkSoft;
+  ctx.font = `700 ${w * 0.018}px Inter, sans-serif`;
+  ctx.fillText("STYLE DNA", pad, cy);
+  cy += w * 0.032;
+  ctx.fillStyle = TOKENS.ink;
+  ctx.font = `500 ${w * 0.02}px Inter, sans-serif`;
+  cy = wrapText(ctx, winner.traits.join("   ·   "), pad, cy, w - pad * 2, w * 0.028, 2) + w * 0.045;
+
+  ctx.fillStyle = TOKENS.paperDeep;
+  const boxH = h * 0.15;
+  ctx.fillRect(pad * 0.4, cy, w - pad * 0.8, boxH);
+  ctx.fillStyle = TOKENS.ink;
+  ctx.font = `700 ${w * 0.02}px Inter, sans-serif`;
+  ctx.fillText("TO COMPLETE THE LOOK", pad, cy + w * 0.032);
+  gapItems.slice(0, 3).forEach((item, i) => {
+    ctx.fillStyle = TOKENS.inkSoft;
+    ctx.font = `500 ${w * 0.019}px Inter, sans-serif`;
+    ctx.fillText(truncateToWidth(ctx, `${i + 1}. ${item.t}`, w - pad * 1.6), pad, cy + w * 0.062 + i * w * 0.028);
+  });
+  cy += boxH + w * 0.045;
+
+  source.swatches.forEach((c, i) => {
+    const dotX = pad + i * w * 0.09 + w * 0.026;
+    ctx.fillStyle = c.hex;
+    ctx.beginPath();
+    ctx.arc(dotX, cy, w * 0.026, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.textAlign = "center";
+    ctx.fillStyle = TOKENS.inkSoft;
+    ctx.font = `500 ${w * 0.013}px Inter, sans-serif`;
+    ctx.fillText(nearestColorName(c.r, c.g, c.b), dotX, cy + w * 0.045);
+    ctx.textAlign = "left";
+  });
+  cy += w * 0.09;
+
+  ctx.fillStyle = TOKENS.ink;
+  ctx.font = `700 ${w * 0.018}px Inter, sans-serif`;
+  ctx.fillText("AVOID", pad, cy);
+  ctx.fillStyle = TOKENS.inkSoft;
+  ctx.font = `400 ${w * 0.017}px Inter, sans-serif`;
+  wrapText(ctx, winner.avoid.slice(0, 2).join("   ·   "), pad, cy + w * 0.028, w - pad * 2, w * 0.024, 2);
+
+  ctx.fillStyle = TOKENS.inkSoft;
+  ctx.font = `600 ${w * 0.016}px Inter, sans-serif`;
+  ctx.fillText("Generated by StyleVault · stylevault.com", pad, h - pad * 0.85);
+  ctx.font = `400 ${w * 0.013}px Inter, sans-serif`;
+  wrapText(
+    ctx,
+    "Style estimate based on color and light, not a professional design consult. May include affiliate links.",
+    pad, h - pad * 0.85 + w * 0.022, w - pad * 2, w * 0.018, 2
+  );
+}
+
+/* ============================================================
+   ROOM ILLUSTRATION
+   ============================================================ */
+function RoomIllustration({ palette, variant = 0 }) {
+  const c = palette.map((p) => p.hex || rgbToHex(p.r, p.g, p.b));
+  const wall = c[0], floor = c[2] || c[1], furn = c[1], accent = c[3] || c[0], trim = c[4] || c[2];
+  return (
+    <svg viewBox="0 0 200 150" className="rsr-illustration">
+      <rect x="0" y="0" width="200" height="105" fill={wall} />
+      <rect x="0" y="105" width="200" height="45" fill={floor} />
+      {variant === 0 && (
+        <>
+          <rect x="128" y="18" width="52" height="58" rx="2" fill={trim} opacity="0.55" />
+          <rect x="18" y="80" width="72" height="34" rx="10" fill={furn} />
+          <circle cx="150" cy="118" r="13" fill={accent} />
+        </>
+      )}
+      {variant === 1 && (
+        <>
+          <rect x="14" y="14" width="34" height="72" rx="1" fill={trim} opacity="0.5" />
+          <path d="M118 116 L150 54 L182 116 Z" fill={furn} opacity="0.9" />
+          <rect x="58" y="90" width="42" height="26" rx="4" fill={accent} />
+        </>
+      )}
+      {variant === 2 && (
+        <>
+          <circle cx="150" cy="40" r="23" fill={trim} opacity="0.5" />
+          <rect x="18" y="74" width="56" height="42" rx="18" fill={furn} />
+          <rect x="88" y="96" width="62" height="19" rx="9" fill={accent} opacity="0.92" />
+        </>
+      )}
+      <rect x="1" y="1" width="198" height="148" fill="none" stroke={TOKENS.line} strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+/* ============================================================
+   MAIN COMPONENT
+   ============================================================ */
+const STAGES = ["Extracting colors", "Reading contrast", "Matching style library", "Building your report"];
+const delay = (ms) => new Promise((res) => setTimeout(res, ms));
+
+export default function RoomStyleReport() {
+  const [source, setSource] = useState(null);
+  const [boosts, setBoosts] = useState({});
+  const [checkedItems, setCheckedItems] = useState({});
+  const [gapItems, setGapItems] = useState([]);
+  const [baseCohesion, setBaseCohesion] = useState(null);
+  const [history, setHistory] = useState(vaultGet());
+  const [analyzing, setAnalyzing] = useState(false);
+  const [stageIndex, setStageIndex] = useState(0);
+  const [error, setError] = useState(null);
+  const [showInfo, setShowInfo] = useState(false);
+  const [roomType, setRoomType] = useState(ROOM_TYPES[0]);
+  const [revealedSwatch, setRevealedSwatch] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const pushHistory = (result) => {
+    setHistory((h) => {
+      const filtered = h.filter((x) => x.id !== result.id);
+      const next = [result, ...filtered].slice(0, 4);
+      vaultSet(next);
+      return next;
+    });
+  };
+
+  const applyResult = (result) => {
+    setBoosts({});
+    setCheckedItems({});
+    setError(null);
+    const items = pickGapItems(result.scored[0]);
+    setGapItems(items);
+    setBaseCohesion(computeCohesion(result.scored));
+    setSource(result);
+    pushHistory(result);
+  };
+
+  const loadDemo = (preset) => {
+    const scored = scoreStyles(preset.palette, preset.variance, {});
+    applyResult({
+      id: "demo-" + preset.id,
+      type: "demo",
+      name: preset.name,
+      variant: preset.variant,
+      swatches: preset.palette,
+      variance: preset.variance,
+      scored,
+    });
+  };
+
+  const handleUploadClick = () => fileInputRef.current?.click();
+
+  const handleFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setError(null);
+    const reader = new FileReader();
+    reader.onerror = () => setError("Could not read that file. Try a JPG or PNG.");
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onerror = () => setError("Could not read that file. Try a JPG or PNG.");
+      img.onload = () => runAnalysis(img);
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const runAnalysis = async (img) => {
+    setAnalyzing(true);
+    setStageIndex(0);
+    // 360px, not 240 — the staged/await-yielded pipeline below already
+    // keeps this off the main thread in one long block, which was the
+    // actual risk last round, not the pixel count itself. At 360px this
+    // reliably catches small accent colors (a lamp, a cushion, a plant)
+    // that a smaller sample can miss entirely.
+    const maxDim = 360;
+    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    let imageData;
+    try {
+      imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    } catch (err) {
+      setError("This image couldn't be analyzed in your browser. Try a different photo.");
+      setAnalyzing(false);
+      releaseCanvas(canvas);
+      return;
+    }
+
+    const pixels = [];
+    const d = imageData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 120) continue;
+      pixels.push([d[i], d[i + 1], d[i + 2]]);
+    }
+    if (pixels.length < 20) {
+      setError("That photo reads as almost one flat color — try one with more of the room in frame.");
+      setAnalyzing(false);
+      releaseCanvas(canvas);
+      return;
+    }
+
+    await delay(150);
+    setStageIndex(1);
+    const swatches = medianCutQuantize(pixels, 5);
+
+    await delay(150);
+    setStageIndex(2);
+    const variance = computeGridVariance(imageData, 6);
+
+    await delay(150);
+    setStageIndex(3);
+    const scored = scoreStyles(swatches, variance, {});
+    const thumb = canvas.toDataURL("image/jpeg", 0.75);
+    releaseCanvas(canvas);
+
+    await delay(150);
+
+    applyResult({
+      id: "upload-" + Date.now(),
+      type: "upload",
+      name: "Your Room",
+      thumb,
+      swatches,
+      variance,
+      scored,
+    });
+    setAnalyzing(false);
+  };
+
+  const toggleGapItem = (itemText) => {
+    if (!source) return;
+    setCheckedItems((prev) => {
+      const next = { ...prev, [itemText]: !prev[itemText] };
+      const checkedList = gapItems.filter((g) => next[g.t]);
+      const boostSum = checkedList.reduce((s, g) => s + g.i, 0);
+      setBoosts({ [source.scored[0].id]: boostSum });
+      return next;
+    });
+  };
+
+  const reset = () => {
+    setSource(null);
+    setBoosts({});
+    setCheckedItems({});
+    setGapItems([]);
+    setError(null);
+    setShowInfo(false);
+  };
+
+  const scored = source ? scoreStyles(source.swatches, source.variance, boosts) : null;
+  const cohesion = scored ? computeCohesion(scored) : null;
+  const winner = scored ? scored[0] : null;
+  const modifier = winner ? winner.modifiers[0] : "";
+  const profile = source ? weightedProfile(source.swatches) : null;
+
+  const topUpgrade = gapItems.length ? gapItems[0] : null;
+  const topUpgradeDelta =
+    source && topUpgrade
+      ? projectCohesion(source, winner.id, topUpgrade.i) - baseCohesion
+      : 0;
+  const potentialAll = gapItems.reduce((s, g) => s + g.i, 0);
+  const potentialCohesion =
+    source && potentialAll > 0 ? projectCohesion(source, winner.id, potentialAll) : cohesion;
+
+  const handleExport = async (format) => {
+    if (!source || !scored) return;
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready; } catch (e) { /* proceed anyway */ }
+    }
+    const w = format === "story" ? 2160 : 2000;
+    const h = format === "story" ? 3840 : 3000;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    drawPoster(ctx, w, h, source, scored, cohesion, baseCohesion, gapItems);
+    const url = canvas.toDataURL("image/png");
+    releaseCanvas(canvas);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `stylevault-roomstyle-${format}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  return (
+    <div className="rsr-root">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Inter:wght@400;500;600;700&display=swap');
+
+        .rsr-root {
+          --paper: ${TOKENS.paper}; --paperDeep: ${TOKENS.paperDeep}; --ink: ${TOKENS.ink};
+          --inkSoft: ${TOKENS.inkSoft}; --sage: ${TOKENS.sage}; --sageDeep: ${TOKENS.sageDeep};
+          --clay: ${TOKENS.clay}; --line: ${TOKENS.line}; --cream: ${TOKENS.cream};
+          background: var(--paper); color: var(--ink); font-family: 'Inter', sans-serif;
+          min-height: 100%; padding: clamp(20px, 5vw, 48px); box-sizing: border-box;
+        }
+        .rsr-root * { box-sizing: border-box; }
+        .rsr-wrap { max-width: 760px; margin: 0 auto; }
+
+        .rsr-eyebrow { font-weight: 700; font-size: 12px; letter-spacing: 0.14em; color: var(--sageDeep); margin: 0 0 10px; text-transform: uppercase; }
+        .rsr-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: clamp(28px, 5vw, 42px); line-height: 1.08; margin: 0 0 8px; letter-spacing: -0.01em; }
+        .rsr-tagline { font-size: 15px; color: var(--inkSoft); max-width: 46ch; line-height: 1.5; margin: 0 0 24px; }
+
+        .rsr-roomtype-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
+        .rsr-roomtype-btn {
+          display: flex; align-items: center; gap: 6px; min-height: 44px;
+          border: 1.5px solid var(--line); border-radius: 20px; padding: 8px 14px;
+          background: var(--cream); font-size: 12.5px; font-weight: 600; color: var(--inkSoft);
+          cursor: pointer; font-family: 'Inter', sans-serif;
+        }
+        .rsr-roomtype-btn.is-active { border-color: var(--ink); color: var(--ink); background: var(--paperDeep); }
+
+        .rsr-btn {
+          font-family: 'Inter', sans-serif; font-weight: 600; font-size: 14px; border-radius: 3px;
+          padding: 12px 18px; min-height: 44px; border: 1.5px solid var(--ink); background: transparent;
+          color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+          transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+        }
+        .rsr-btn:hover { background: var(--ink); color: var(--paper); }
+        .rsr-btn:active { transform: scale(0.98); }
+        .rsr-btn:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+        .rsr-btn-primary { background: var(--ink); color: var(--paper); }
+        .rsr-btn-primary:hover { background: var(--sageDeep); border-color: var(--sageDeep); }
+        .rsr-btn-ghost { border-color: var(--line); color: var(--inkSoft); }
+        .rsr-btn-ghost:hover { background: var(--paperDeep); color: var(--ink); }
+
+        .rsr-demo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 16px; }
+        .rsr-demo-card { background: var(--cream); border: 1.5px solid var(--line); border-radius: 4px; padding: 12px; cursor: pointer; text-align: left; font-family: 'Inter', sans-serif; transition: border-color 0.15s ease, transform 0.1s ease; }
+        .rsr-demo-card:hover { border-color: var(--sage); transform: translateY(-2px); }
+        .rsr-demo-card:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+        .rsr-illustration { width: 100%; height: auto; display: block; border-radius: 2px; margin-bottom: 10px; }
+        .rsr-demo-name { font-weight: 600; font-size: 13.5px; }
+        .rsr-demo-sub { font-size: 11.5px; color: var(--inkSoft); margin-top: 2px; }
+
+        .rsr-upload-card { border: 1.5px dashed var(--line); border-radius: 4px; padding: 22px; text-align: center; background: var(--cream); margin-bottom: 30px; }
+        .rsr-upload-title { font-weight: 600; font-size: 14.5px; margin-bottom: 4px; }
+        .rsr-upload-sub { font-size: 12.5px; color: var(--inkSoft); margin-bottom: 4px; }
+        .rsr-upload-hint { font-size: 11.5px; color: var(--inkSoft); margin-bottom: 14px; }
+        .rsr-privacy { font-size: 11.5px; color: var(--inkSoft); margin-top: 10px; }
+
+        .rsr-error { background: #F5E4DD; border: 1px solid var(--clay); color: #7A3A2A; font-size: 13px; padding: 10px 14px; border-radius: 3px; margin-bottom: 18px; }
+
+        .rsr-analyzing { padding: 30px 20px; color: var(--inkSoft); font-size: 14px; }
+        .rsr-stage-list { display: flex; flex-direction: column; gap: 10px; max-width: 280px; margin: 0 auto; }
+        .rsr-stage-item { display: flex; align-items: center; gap: 10px; font-size: 13.5px; opacity: 0.4; transition: opacity 0.2s ease; }
+        .rsr-stage-item.is-active, .rsr-stage-item.is-done { opacity: 1; }
+        .rsr-stage-dot { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--inkSoft); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .rsr-stage-item.is-done .rsr-stage-dot { background: var(--sage); border-color: var(--sage); }
+        .rsr-stage-item.is-active .rsr-stage-dot { border-color: var(--clay); animation: rsrSpin 0.9s linear infinite; }
+        @keyframes rsrSpin { 0%{transform:rotate(0)} 100%{transform:rotate(360deg)} }
+
+        .rsr-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 20px; background: var(--paperDeep); margin-bottom: 14px; }
+        .rsr-report-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+        .rsr-winner-label { font-family: 'Fraunces', serif; font-weight: 600; font-size: clamp(24px, 4vw, 32px); line-height: 1.1; }
+        .rsr-modifier-row { font-size: 12.5px; color: var(--inkSoft); font-weight: 500; margin-top: 4px; }
+        .rsr-blurb-toggle { background: none; border: none; color: var(--sageDeep); font-size: 12.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; padding: 6px 0; min-height: 30px; }
+        .rsr-blurb { font-size: 13.5px; color: var(--inkSoft); line-height: 1.6; max-width: 56ch; margin: 4px 0 0; }
+        .rsr-detected { font-size: 12px; color: var(--inkSoft); margin-top: 8px; font-style: italic; }
+
+        .rsr-quote { font-family: 'Fraunces', serif; font-style: italic; font-size: 17px; color: var(--ink); margin: 16px 0 20px; max-width: 50ch; }
+
+        .rsr-cohesion-row { display: flex; align-items: baseline; gap: 12px; margin: 6px 0 4px; flex-wrap: wrap; }
+        .rsr-cohesion-num { font-family: 'Fraunces', serif; font-weight: 700; font-size: 44px; transition: all 0.35s ease; }
+        .rsr-cohesion-label { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: var(--inkSoft); text-transform: uppercase; }
+        .rsr-boost-badge { font-size: 12px; font-weight: 700; color: var(--sageDeep); background: #EAEEE4; padding: 3px 9px; border-radius: 12px; }
+        .rsr-cohesion-sub { font-size: 12.5px; color: var(--inkSoft); margin: 0 0 22px; }
+
+        .rsr-spectrum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; align-items: end; }
+        .rsr-chip { border: 1.5px solid var(--line); border-radius: 3px; overflow: hidden; background: var(--cream); position: relative; }
+        .rsr-chip.is-winner { border-color: var(--ink); box-shadow: 0 6px 14px rgba(33,30,26,0.14); }
+        .rsr-chip.is-third { opacity: 0.85; }
+        .rsr-ribbon { position: absolute; top: 6px; left: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; background: var(--ink); color: var(--paper); padding: 2px 7px; border-radius: 2px; }
+        .rsr-chip-swatch { transition: height 0.4s ease; }
+        .rsr-chip-body { padding: 8px 10px 10px; }
+        .rsr-chip-name { font-size: 12px; font-weight: 600; }
+        .rsr-chip-pct { font-family: 'Fraunces', serif; font-weight: 700; font-size: 19px; color: var(--ink); transition: all 0.3s ease; }
+
+        .rsr-traits-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
+        .rsr-trait-tag { font-size: 11.5px; font-weight: 600; color: var(--sageDeep); background: #EAEEE4; padding: 4px 10px; border-radius: 12px; }
+
+        .rsr-palette-row { display: flex; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+        .rsr-swatch-col {
+          display: flex; flex-direction: column; align-items: center; gap: 4px;
+          background: none; border: none; padding: 6px; font-family: 'Inter', sans-serif;
+          cursor: pointer; min-height: 44px; min-width: 44px; border-radius: 4px;
+        }
+        .rsr-swatch-col:hover { background: var(--paperDeep); }
+        .rsr-swatch-col:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+        .rsr-swatch-dot { width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.12); }
+        .rsr-swatch-label { font-size: 10px; color: var(--inkSoft); font-variant-numeric: tabular-nums; }
+        .rsr-tap-hint { font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--inkSoft); opacity: 0.75; }
+
+        .rsr-room-preview { border-radius: 4px; overflow: hidden; border: 1.5px solid var(--line); margin-bottom: 18px; max-width: 320px; }
+        .rsr-room-photo { width: 100%; height: auto; display: block; }
+
+        .rsr-status-pill { font-size: 11.5px; font-weight: 700; border: 1.5px solid currentColor; border-radius: 12px; padding: 3px 10px; }
+
+        .rsr-impact-callout {
+          display: flex; flex-direction: column; gap: 3px; background: var(--paperDeep);
+          border-left: 3px solid var(--clay); border-radius: 3px; padding: 12px 14px; margin-bottom: 16px;
+        }
+        .rsr-impact-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--inkSoft); }
+        .rsr-impact-item { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+        .rsr-impact-delta { font-size: 12.5px; font-weight: 600; color: var(--clay); }
+
+        .rsr-avoid { font-size: 12.5px; color: var(--inkSoft); margin-bottom: 28px; line-height: 1.6; }
+        .rsr-avoid b { color: var(--ink); font-weight: 700; letter-spacing: 0.04em; }
+
+        .rsr-section-title { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--inkSoft); margin-bottom: 12px; }
+
+        .rsr-checklist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; }
+        .rsr-check-item { display: flex; align-items: center; gap: 10px; border: 1.5px solid var(--line); border-radius: 3px; padding: 8px 12px; background: var(--cream); min-height: 44px; }
+        .rsr-check-item.is-checked { border-color: var(--sage); background: #EAEEE4; }
+        .rsr-check-label { display: flex; align-items: center; gap: 10px; flex: 1; cursor: pointer; min-height: 28px; }
+        .rsr-checkbox-native { appearance: none; -webkit-appearance: none; width: 19px; height: 19px; border-radius: 3px; border: 1.5px solid var(--inkSoft); background: var(--paper); flex-shrink: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; margin: 0; }
+        .rsr-checkbox-native:checked { background: var(--sage); border-color: var(--sage); }
+        .rsr-checkbox-native:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+        .rsr-check-text { font-size: 13.5px; }
+        .rsr-stars { display: flex; gap: 1px; margin-left: 2px; }
+        .rsr-shop-links { display: flex; gap: 6px; }
+        .rsr-shop-link { font-size: 11px; font-weight: 600; color: var(--inkSoft); border: 1px solid var(--line); border-radius: 3px; padding: 6px 9px; min-height: 30px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; transition: border-color 0.15s ease, color 0.15s ease; }
+        .rsr-shop-link:hover { border-color: var(--sage); color: var(--sageDeep); }
+
+        .rsr-export-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 22px; }
+
+        .rsr-history { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+        .rsr-history-chip { font-size: 11.5px; border: 1px solid var(--line); border-radius: 20px; padding: 6px 12px; min-height: 32px; background: var(--cream); cursor: pointer; color: var(--inkSoft); }
+        .rsr-history-chip:hover { border-color: var(--sage); color: var(--ink); }
+        .rsr-history-chip.is-active { border-color: var(--ink); color: var(--ink); font-weight: 600; }
+
+        .rsr-footer-note { font-size: 11.5px; color: var(--inkSoft); margin-top: 30px; border-top: 1px solid var(--line); padding-top: 16px; line-height: 1.6; }
+        .rsr-disclosure { font-size: 11px; color: var(--inkSoft); margin-top: 6px; }
+
+        @media (max-width: 480px) {
+          .rsr-spectrum { grid-template-columns: 1fr; }
+          .rsr-check-item { flex-wrap: wrap; }
+        }
+      `}</style>
+
+      <div className="rsr-wrap">
+        <p className="rsr-eyebrow">StyleVault · Home</p>
+        <h1 className="rsr-title">RoomStyle Report</h1>
+        <p className="rsr-tagline">Discover your room's style, what's missing, and how to complete the look.</p>
+
+        {error && <div className="rsr-error">{error}</div>}
+
+        {!source && !analyzing && (
+          <>
+            <p className="rsr-section-title">Which room?</p>
+            <div className="rsr-roomtype-row">
+              {ROOM_TYPES.map((rt) => (
+                <button
+                  key={rt.id}
+                  type="button"
+                  className={`rsr-roomtype-btn${roomType.id === rt.id ? " is-active" : ""}`}
+                  onClick={() => setRoomType(rt)}
+                >
+                  <rt.Icon size={14} />
+                  {rt.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="rsr-section-title">Try an instant demo</p>
+            <div className="rsr-demo-grid">
+              {DEMO_PRESETS.map((preset) => (
+                <button key={preset.id} className="rsr-demo-card" onClick={() => loadDemo(preset)} type="button">
+                  <RoomIllustration palette={preset.palette} variant={preset.variant} />
+                  <div className="rsr-demo-name">{preset.name}</div>
+                  <div className="rsr-demo-sub">View sample report</div>
+                </button>
+              ))}
+            </div>
+
+            <div className="rsr-upload-card">
+              <div className="rsr-upload-title">Or analyze your own room</div>
+              <div className="rsr-upload-sub">One photo is enough — a wide shot works best.</div>
+              <div className="rsr-upload-hint">💡 For the most accurate read, try a shot without people in frame.</div>
+              <button className="rsr-btn rsr-btn-primary" onClick={handleUploadClick} type="button">
+                <Upload size={16} />
+                Upload a photo
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+              <p className="rsr-privacy">Your photo is analyzed entirely in your browser. Nothing is uploaded anywhere.</p>
+            </div>
+          </>
+        )}
+
+        {analyzing && (
+          <div className="rsr-analyzing">
+            <div className="rsr-stage-list">
+              {STAGES.map((label, i) => (
+                <div key={label} className={`rsr-stage-item${i === stageIndex ? " is-active" : i < stageIndex ? " is-done" : ""}`}>
+                  <span className="rsr-stage-dot">{i < stageIndex && <Check size={10} color="#fff" strokeWidth={3} />}</span>
+                  {label}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {source && scored && !analyzing && (
+          <>
+            <div className="rsr-room-preview">
+              {source.type === "upload" ? (
+                <img src={source.thumb} alt="Your uploaded room" className="rsr-room-photo" />
+              ) : (
+                <RoomIllustration palette={source.swatches} variant={source.variant} />
+              )}
+            </div>
+
+            <div className="rsr-badge" style={{ color: cohesionColor(cohesion) }}>
+              <Sparkles size={13} />
+              Style Certified {cohesion}%
+            </div>
+
+            <div className="rsr-report-head">
+              <div>
+                <div className="rsr-winner-label">{winner.name}</div>
+                <div className="rsr-modifier-row">{winner.modifiers.join(" · ")} · {roomType.label}</div>
+                <button className="rsr-blurb-toggle" onClick={() => setShowInfo((v) => !v)} type="button">
+                  <Info size={13} />
+                  {showInfo ? "Hide description" : "What does this mean?"}
+                </button>
+                {showInfo && (
+                  <>
+                    <p className="rsr-blurb">{winner.blurb}</p>
+                    <p className="rsr-detected">
+                      Detected: {hueFamilyName(profile.hue)} palette ·{" "}
+                      {levelWord(profile.sat, 0.18, 0.4, ["muted", "balanced", "vivid"])} saturation ·{" "}
+                      {levelWord(profile.light, 0.4, 0.65, ["dark", "mid-toned", "bright"])} light ·{" "}
+                      {levelWord(source.variance, 0.28, 0.5, ["calm, low-contrast", "moderate contrast", "high-contrast"])}
+                    </p>
+                  </>
+                )}
+              </div>
+              <button className="rsr-btn rsr-btn-ghost" onClick={reset} type="button">
+                <RotateCcw size={14} />
+                Try another
+              </button>
+            </div>
+
+            <p className="rsr-quote">"{winner.quote}"</p>
+
+            <div className="rsr-cohesion-row">
+              <span className="rsr-cohesion-num" style={{ color: cohesionColor(cohesion) }}>{cohesion}%</span>
+              <span className="rsr-cohesion-label">Cohesion Score</span>
+              <span className="rsr-status-pill" style={{ color: cohesionColor(cohesion) }}>{roomStatusLabel(cohesion)}</span>
+              {cohesion > baseCohesion && <span className="rsr-boost-badge">+{cohesion - baseCohesion}% boosted</span>}
+            </div>
+            <p className="rsr-cohesion-sub">
+              How clearly one style reads versus a mix of influences — {tierClause(cohesion)}
+              {potentialCohesion > cohesion && (
+                <> Potential: <b>{potentialCohesion}%</b> with every upgrade below.</>
+              )}
+            </p>
+
+            <p className="rsr-section-title">Your style spectrum</p>
+            <div className="rsr-spectrum">
+              {scored.slice(0, 3).map((b, i) => (
+                <div className={`rsr-chip${i === 0 ? " is-winner" : i === 2 ? " is-third" : ""}`} key={b.id}>
+                  {i === 0 && <span className="rsr-ribbon">BEST MATCH</span>}
+                  <div
+                    className="rsr-chip-swatch"
+                    style={{ background: bucketSwatch(b), height: `${(i === 0 ? 34 : i === 2 ? 22 : 28) + b.pct * 1.05}px` }}
+                  />
+                  <div className="rsr-chip-body">
+                    <div className="rsr-chip-name">{b.name}</div>
+                    <div className="rsr-chip-pct">{Math.round(b.pct)}%</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="rsr-section-title">Style DNA</p>
+            <div className="rsr-traits-row">
+              {winner.traits.map((t) => (
+                <span className="rsr-trait-tag" key={t}>{t}</span>
+              ))}
+            </div>
+
+            <p className="rsr-section-title">Extracted palette <span className="rsr-tap-hint">(tap a swatch for its hex code)</span></p>
+            <div className="rsr-palette-row">
+              {source.swatches.map((c, i) => {
+                const hex = c.hex || rgbToHex(c.r, c.g, c.b);
+                return (
+                  <button
+                    type="button"
+                    className="rsr-swatch-col"
+                    key={i}
+                    onClick={() => setRevealedSwatch(revealedSwatch === i ? null : i)}
+                  >
+                    <div className="rsr-swatch-dot" style={{ background: hex }} />
+                    <span className="rsr-swatch-label">
+                      {revealedSwatch === i ? hex.toUpperCase() : nearestColorName(c.r, c.g, c.b)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="rsr-avoid"><b>Avoid</b> — {winner.avoid.slice(0, 2).join("  ·  ")}</p>
+
+            {topUpgrade && (
+              <div className="rsr-impact-callout">
+                <span className="rsr-impact-label">Highest Impact Upgrade</span>
+                <span className="rsr-impact-item">{topUpgrade.t}</span>
+                <span className="rsr-impact-delta">Projected +{topUpgradeDelta} points</span>
+              </div>
+            )}
+
+            <p className="rsr-section-title">Ideas to strengthen this style</p>
+            <div className="rsr-checklist">
+              {gapItems.map((item) => {
+                const isChecked = !!checkedItems[item.t];
+                const inputId = `gap-${item.t.replace(/\s+/g, "-")}`;
+                return (
+                  <div className={`rsr-check-item${isChecked ? " is-checked" : ""}`} key={item.t}>
+                    <label className="rsr-check-label" htmlFor={inputId}>
+                      <input
+                        id={inputId}
+                        type="checkbox"
+                        className="rsr-checkbox-native"
+                        checked={isChecked}
+                        onChange={() => toggleGapItem(item.t)}
+                      />
+                      <span className="rsr-check-text">{item.t}</span>
+                      <span className="rsr-stars">
+                        {Array.from({ length: item.i }).map((_, si) => (
+                          <Star key={si} size={11} fill={TOKENS.clay} color={TOKENS.clay} />
+                        ))}
+                      </span>
+                    </label>
+                    <div className="rsr-shop-links">
+                      <a className="rsr-shop-link" href={amazonUrl(item.t)} target="_blank" rel="noopener noreferrer">
+                        <ShoppingBag size={11} /> Amazon
+                      </a>
+                      <a className="rsr-shop-link" href={etsyUrl(item.t)} target="_blank" rel="noopener noreferrer">
+                        <ShoppingBag size={11} /> Etsy
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <p className="rsr-section-title">Save your report</p>
+            <div className="rsr-export-row">
+              <button className="rsr-btn rsr-btn-primary" onClick={() => handleExport("pinterest")} type="button">
+                <Download size={15} />
+                Pinterest (2:3)
+              </button>
+              <button className="rsr-btn rsr-btn-primary" onClick={() => handleExport("story")} type="button">
+                <Download size={15} />
+                Story (9:16)
+              </button>
+            </div>
+
+            {history.length > 1 && (
+              <>
+                <p className="rsr-section-title">Compare this session</p>
+                <div className="rsr-history">
+                  {history.map((h) => (
+                    <button
+                      key={h.id}
+                      type="button"
+                      className={`rsr-history-chip${source.id === h.id ? " is-active" : ""}`}
+                      onClick={() => applyResult(h)}
+                    >
+                      {h.name} · {h.scored[0].name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <p className="rsr-footer-note">
+              <Sparkles size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+              This report is a style estimate based on color and light — not a professional interior design consultation.
+              Analysis considers color harmony, contrast, saturation, and material balance.
+              <span className="rsr-disclosure">
+                As an Amazon Associate and Etsy affiliate, StyleVault may earn from qualifying purchases made through links in this report.
+              </span>
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
