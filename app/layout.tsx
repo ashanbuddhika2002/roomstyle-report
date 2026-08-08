@@ -7,11 +7,6 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "StyleVault | Home Decor & Interior Design",
   description: "Discover curated room style aesthetics, AI-powered interior design reports, and home decor inspiration.",
-  verification: {
-    other: {
-      'p:domain_verify': '70851e5ac243e1a423465b01393f3ea4',
-    },
-  },
 };
 
 export default function RootLayout({
@@ -21,6 +16,9 @@ export default function RootLayout({
 }>) {
   return (
     
+      
+        
+      
       {children}
     
   );
