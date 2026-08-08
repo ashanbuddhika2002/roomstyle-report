@@ -18,8 +18,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    
-      {children}
-    
+    <html lang="en">
+      <head>
+        <meta name="p:domain_verify" content="70851e5ac243e1a423465b01393f3ea4" />
+      </head>
+      <body className={inter.className}>{children}</body>
+    </html>
   );
 }
